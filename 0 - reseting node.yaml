@@ -1,0 +1,34 @@
+---
+- name: Reseting node
+  hosts: etcd
+  tasks:
+   - name: Exécuter la commande kubeadm reset
+     command: kubeadm reset --force
+
+   - name: deleting directory kubernetes
+     become: yes
+     file:
+       path: /etc/kubernetes/
+       state: absent
+
+   - name: deleting kubeadmcfg.yaml
+     become: yes
+     file:
+       path: /home/securiport/kubeadmcfg.yaml
+       state: absent
+
+   - name: rebooting ALL machines
+     reboot:
+
+- name: deleting etcd on controller
+  hosts: localhost
+  tasks:
+   - name: deleting etcd03 on controller
+     file:
+       path: /etcd03
+       state: absent
+
+   - name: deleting etcd02 on controller
+     file:
+       path: /etcd02
+       state: absent

@@ -1,0 +1,112 @@
+---
+- name: Initializing etcd certs
+  hosts: etcd01
+  vars:
+    HOST0: 192.168.40.88
+    HOST1: 192.168.40.89
+    HOST2: 192.168.40.90
+  tasks:
+  - name: Initializing certs etcd-ca Kubernetes cluster
+    command: kubeadm init phase certs etcd-ca
+
+  - name: init phase certs etcd-server for etcd03
+    command: kubeadm init phase certs etcd-server --config=/tmp/{{ HOST2 }}/kubeadmcfg.yaml
+
+  - name: init phase certs etcd-peer for etcd03
+    command: kubeadm init phase certs etcd-peer --config=/tmp/{{ HOST2 }}/kubeadmcfg.yaml
+
+  - name: init phase certs etcd-healthcheck-client for etcd03
+    command: kubeadm init phase certs etcd-healthcheck-client --config=/tmp/{{ HOST2 }}/kubeadmcfg.yaml
+
+  - name: init phase certs apiserver-etcd-client for etcd03
+    command: kubeadm init phase certs apiserver-etcd-client --config=/tmp/{{ HOST2 }}/kubeadmcfg.yaml
+
+  - name: Copy certificates to /tmp/{{ HOST2 }}
+    command: cp -R /etc/kubernetes/pki /tmp/{{ HOST2 }}/
+
+  - name: find non-reusable certificates insite /etc/kubernetes/pki
+    find:
+      paths: /etc/kubernetes/pki
+      patterns: "*"
+      recurse: yes
+      file_type: file
+      excludes:
+        - ca.crt
+        - ca.key
+    register: files_to_delete
+
+  - name: cleanup non-reusable certificates insite /etc/kubernetes/pki
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items: "{{ files_to_delete.files }}"
+
+  - name: init phase certs etcd-server for etcd02
+    command: kubeadm init phase certs etcd-server --config=/tmp/{{ HOST1 }}/kubeadmcfg.yaml
+
+  - name: init phase certs etcd-peer for etcd02
+    command: kubeadm init phase certs etcd-peer --config=/tmp/{{ HOST1 }}/kubeadmcfg.yaml
+
+  - name: init phase certs etcd-healthcheck-client for etcd02
+    command: kubeadm init phase certs etcd-healthcheck-client --config=/tmp/{{ HOST1 }}/kubeadmcfg.yaml
+
+  - name: init phase certs apiserver-etcd-client for etcd02
+    command: kubeadm init phase certs apiserver-etcd-client --config=/tmp/{{ HOST1 }}/kubeadmcfg.yaml
+
+  - name: Copy certificates to /tmp/{{ HOST1 }}
+    command: cp -R /etc/kubernetes/pki /tmp/{{ HOST1 }}/
+ 
+  - name: find non-reusable certificates insite /etc/kubernetes/pki
+    find:
+      paths: /etc/kubernetes/pki
+      patterns: "*"
+      recurse: yes
+      file_type: file
+      excludes:
+        - ca.crt
+        - ca.key
+    register: files_to_delete
+
+  - name: cleanup non-reusable certificates insite /etc/kubernetes/pki
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items: "{{ files_to_delete.files }}"
+
+  - name: init phase certs etcd-server for etcd01
+    command: kubeadm init phase certs etcd-server --config=/tmp/{{ HOST0 }}/kubeadmcfg.yaml
+
+  - name: init phase certs etcd-peer for etcd01
+    command: kubeadm init phase certs etcd-peer --config=/tmp/{{ HOST0 }}/kubeadmcfg.yaml
+
+  - name: init phase certs etcd-healthcheck-client for etcd01
+    command: kubeadm init phase certs etcd-healthcheck-client --config=/tmp/{{ HOST0 }}/kubeadmcfg.yaml
+
+  - name: init phase certs apiserver-etcd-client for etcd01
+    command: kubeadm init phase certs apiserver-etcd-client --config=/tmp/{{ HOST0 }}/kubeadmcfg.yaml
+
+  - name: find clean up certs that should not be copied off this host
+    find:
+      paths: "/tmp/{{ HOST2 }}/pki"
+      patterns: "ca.key"
+      file_type: file
+    register: files_to_delete
+
+  - name: cleanup clean up certs that should not be copied off this host
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items: "{{ files_to_delete.files }}"
+
+  - name: find clean up certs that should not be copied off this host
+    find:
+      paths: "/tmp/{{ HOST1 }}/pki"
+      patterns: "ca.key"
+      file_type: file
+    register: files_to_delete
+
+  - name: cleanup clean up certs that should not be copied off this host
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items: "{{ files_to_delete.files }}"

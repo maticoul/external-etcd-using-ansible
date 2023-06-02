@@ -1,0 +1,186 @@
+- name: Create three subdirectories
+  hosts: localhost
+  tasks:
+    - name: creating kubernetes directory
+      file:
+        path: /home/securiport/master01/pki/etcd
+        state: directory
+        owner: securiport
+        group: securiport
+        mode: "0755"
+
+    - name: creating kubernetes directory
+      file:
+        path: /home/securiport/master01/pki/etcd
+        state: directory
+        owner: securiport
+        group: securiport
+        mode: "0755"
+
+- name: Copy certs to controller
+  hosts: etcd01
+  tasks:
+    - name: Copy apiserver-etcd-client.crt
+      fetch:
+        src: /etc/kubernetes/pki/apiserver-etcd-client.crt
+        dest: /home/securiport/master01/pki/
+        flat: yes
+
+    - name: copy apiserver-etcd-client.key
+      fetch:
+        src: /etc/kubernetes/pki/apiserver-etcd-client.key
+        dest: /home/securiport/master01/pki/
+        flat: yes
+
+    - name: copy ca.crt
+      fetch:
+        src: /etc/kubernetes/pki/etcd/ca.crt
+        dest: /home/securiport/master01/pki/etcd/
+        flat: yes
+
+- name: pki directory
+  hosts: masters
+  vars:
+    HOST0: 192.168.40.88
+    HOST1: 192.168.40.89
+    HOST2: 192.168.40.90
+  become: yes
+  tasks:
+    - name: creating kubernetes directory
+      file:
+        path: /etc/kubernetes
+        state: directory
+        mode: '0755'
+
+    - name: Create directory sub1
+      copy:
+        src: /home/securiport/master01/pki
+        dest: /etc/kubernetes/
+        mode: '0755'
+
+    - name: change pki groupe own
+      file:
+        path: /etc/kubernetes/pki
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: pull images
+      become: yes
+      command:
+        cmd: kubeadm config images pull
+      register: __output
+
+    - name: Creating kubeadm configuracion file
+      copy:
+        content: |
+          ---
+          apiVersion: kubeadm.k8s.io/v1beta3
+          kind: InitConfiguration
+          nodeRegistration:
+            kubeletExtraArgs:
+              volume-plugin-dir: "/opt/libexec/kubernetes/kubelet-plugins/volume/exec/"
+          ---
+          apiVersion: kubeadm.k8s.io/v1beta3
+          kind: ClusterConfiguration
+          kubernetesVersion: stable
+          networking:
+            podSubnet: 192.168.0.0/16
+          clusterName: lab-cluster
+          controlPlaneEndpoint: "192.168.40.51:6443"
+          etcd:
+            external:
+              endpoints:
+                - https://{{ HOST0 }}:2379
+                - https://{{ HOST1 }}:2379
+                - https://{{ HOST2 }}:2379
+              caFile: /etc/kubernetes/pki/etcd/ca.crt
+              certFile: /etc/kubernetes/pki/apiserver-etcd-client.crt
+              keyFile: /etc/kubernetes/pki/apiserver-etcd-client.key
+          controllerManager:
+            extraArgs:
+              flex-volume-plugin-dir: "/opt/libexec/kubernetes/kubelet-plugins/volume/exec/"
+        dest: /home/securiport/kubeadm-config.yaml
+     #   backup: yes
+
+    - name: kubeadm init --config kubeadm-config.yaml
+      become: yes
+      shell: kubeadm init --config /home/securiport/kubeadm-config.yaml 
+
+- name: pki directory
+  hosts: master01
+  tasks:
+    - name: creating .kube directory
+      become: yes
+      file:
+        path: /home/securiport/.kube
+        state: directory
+        mode : 0755
+
+    - name: copy file admin.conf 
+      become: yes
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/securiport/.kube/config
+        remote_src: yes
+        mode : 0600
+        
+    - name: Creating calico configuracion file
+      become: yes
+      set_fact:
+        calico_content: |
+          # Source: https://docs.projectcalico.org/manifests/custom-resources.yaml
+          apiVersion: operator.tigera.io/v1
+          kind: Installation
+          metadata:
+            name: default
+          spec:
+            # Configures Calico networking.
+            calicoNetwork:
+              # Note: The ipPools section cannot be modified post-install.
+              ipPools:
+              - blockSize: 26
+                cidr: 192.168.0.0/16
+                encapsulation: VXLANCrossSubnet
+                natOutgoing: Enabled
+                nodeSelector: all()
+              flexVolumePath: /opt/libexec/kubernetes/kubelet-plugins/volume/exec/
+      
+    - name: Creating calico configuracion file on home directory
+      become: yes
+      copy:
+        content: "{{ calico_content }}"
+        dest: /home/securiport/calico.yaml
+        backup: yes
+
+    - name: install Tigera
+      shell: |
+        kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/tigera-operator.yaml
+
+    - name: Downloading calico using get_url
+      become: yes
+      get_url:
+        url: https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/custom-resources.yaml -O
+        dest: /home/securiport
+
+    - name: install Calico
+      shell: |
+       kubectl create -f /home/securiport/custom-resources.yaml
+
+    - name: get join command
+      shell: kubeadm token create --print-join-command
+      register: join_command_raw
+
+    - name: set join command
+      set_fact:
+        join_command: "{{ join_command_raw.stdout_lines[0] }}"
+
+- name: Join workers
+  hosts: workers
+  become: yes
+  tasks:
+    - name: join cluster
+      shell: "{{ hostvars['master01'].join_command }} --ignore-preflight-errors all  >> node_joined.txt"
+      args:
+        chdir: $HOME
+        creates: node_joined.txt
